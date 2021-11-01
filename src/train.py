@@ -16,14 +16,13 @@ import torch.nn.functional as F
 import torch
 
 from utils import plot_batch_train
-import random
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--epoch", type=int, default=0, help="epoch to start training from")
 parser.add_argument("--n_epochs", type=int, default=100, help="number of epochs of training")
 parser.add_argument("--model_name", type=str, help="name of the model")
 parser.add_argument("--dataset", type=str, help="path to dataset for training")
-parser.add_argument("--n_spkrs", type=int, default=2, help="number of speakers for conversion, must match that of preprocessing")
+parser.add_argument("--n_spkrs", type=int, default=4, help="number of speakers for conversion, must match that of preprocessing")
 parser.add_argument("--batch_size", type=int, default=4, help="size of the batches")
 parser.add_argument("--lr", type=float, default=0.0001, help="adam: learning rate")
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
@@ -45,6 +44,15 @@ cuda = True if torch.cuda.is_available() else False
 
 # Create sample and checkpoint directories
 os.makedirs("saved_models/%s" % opt.model_name, exist_ok=True)
+
+# finds all possible transfer pairings without repetition (each will be used for a forward and backward pass)
+transfer_combos = list(itertools.combinations(range(2, 4), 2))
+
+# Create plot output directories
+if opt.plot_interval != -1:
+    for pair in transfer_combos:
+        os.makedirs("out_train/%s/plot_%dt%d/" % (opt.model_name, pair[0], pair[1]), exist_ok=True)
+        os.makedirs("out_train/%s/plot_%dt%d/" % (opt.model_name, pair[1], pair[0]), exist_ok=True)
 
 # Losses
 criterion_GAN = torch.nn.MSELoss()
@@ -71,13 +79,13 @@ if cuda:
 if opt.epoch != 0:
     # Load pretrained models
     encoder.load_state_dict(torch.load("saved_models/%s/encoder_%02d.pth" % (opt.model_name, opt.epoch-1)))
-    for n in range(opt.n_spkrs):
+    for n in range(2, 4):
         G[n].load_state_dict(torch.load("saved_models/%s/G%d_%02d.pth" % (opt.model_name, n+1, opt.epoch-1)))
         D[n].load_state_dict(torch.load("saved_models/%s/D%d_%02d.pth" % (opt.model_name, n+1, opt.epoch-1)))
 else:
     # Initialize weights
     encoder.apply(weights_init_normal)
-    for n in range(opt.n_spkrs):
+    for n in range(2, 4):
         G[n].apply(weights_init_normal)
         D[n].apply(weights_init_normal)
 
@@ -85,7 +93,7 @@ else:
 lambda_0 = 10   # GAN
 lambda_1 = 0.1  # KL (encoded spect)
 lambda_2 = 100  # ID pixel-wise
-lambda_3 = 0.1  # KL (encoded translated spect)
+lambda_3 = 0 # 0.1  # KL (encoded translated spect)
 lambda_4 = 100  # Cycle pixel-wise
 lambda_5 = 10   # latent space L1
 
@@ -127,19 +135,13 @@ def compute_kl(mu):
 # ---------------------------------------------------------
 
 def train_local(i, epoch, batch, id_1, id_2, losses):
-        
-        # Create plot output directories if doesn't exist already
-        if opt.plot_interval != -1:
-            os.makedirs("out_train/%s/plot_%dt%d/" % (opt.model_name, id_1, id_2), exist_ok=True)
-            os.makedirs("out_train/%s/plot_%dt%d/" % (opt.model_name, id_2, id_1), exist_ok=True)
-
         # Set model input
         X1 = Variable(batch[id_1].type(Tensor))
         X2 = Variable(batch[id_2].type(Tensor))
 
         # Adversarial ground truths
-        valid = Variable(Tensor(np.ones((X1.size(0), *D[id_1].output_shape))), requires_grad=False)
-        fake = Variable(Tensor(np.zeros((X1.size(0), *D[id_1].output_shape))), requires_grad=False)
+        valid = Variable(Tensor(np.ones((X1.size(0), *D[0].output_shape))), requires_grad=False)
+        fake = Variable(Tensor(np.zeros((X1.size(0), *D[0].output_shape))), requires_grad=False)
 
         # -------------------------------
         #  Train Encoder and Generators
@@ -247,10 +249,10 @@ def train_global():
         losses = {'G': [],'D': []}
         progress = tqdm(enumerate(dataloader),desc='',total=len(dataloader))
         
-        # For each target, randomly choose a source for training
-        for trg_id in range(opt.n_spkrs):
-            src_id = random.randint(0, opt.n_spkrs-1)   
-            losses = train_local(i, epoch, batch, pair[src_id], pair[trg_id], losses)
+        for i, batch in progress:
+
+            for pair in transfer_combos:         
+                losses = train_local(i, epoch, batch, pair[0], pair[1], losses)
 
             # Update progress bar
             progress.set_description("[Epoch %d/%d] [D loss: %f] [G loss: %f] "
@@ -258,13 +260,13 @@ def train_global():
 
         # Update learning rates
         lr_scheduler_G.step()
-        for n in range(opt.n_spkrs):
+        for n in range(2, 4): # for n in range(0, opt.n_spkrs):
             lr_scheduler_D[n].step()
 
         if opt.checkpoint_interval != -1 and (epoch+1) % opt.checkpoint_interval == 0:
             # Save model checkpoints
             torch.save(encoder.state_dict(), "saved_models/%s/encoder_%02d.pth" % (opt.model_name, epoch))
-            for n in range(opt.n_spkrs):
+            for n in range(2, 4): # for n in range(0, opt.n_spkrs):
                 torch.save(G[n].state_dict(), "saved_models/%s/G%d_%02d.pth" % (opt.model_name, n+1, epoch))
                 torch.save(D[n].state_dict(), "saved_models/%s/D%d_%02d.pth" % (opt.model_name, n+1, epoch))
 
