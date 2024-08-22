@@ -23,17 +23,17 @@ class DataProc(torch.utils.data.Dataset):
         # read the number of folders started with spkr_ under /workspace/data/kinwai/tt-vae-gan/voice_conversion/data/data_urmp
         data_urmp_path = args.dataset
         spkr_folders = [folder for folder in os.listdir(data_urmp_path) if folder.startswith('spkr_')]
-
+        self.target_sr = 16000
+        self.segment_size = 25600
         self.mel_specgram = transforms.MelSpectrogram(
             sample_rate=sample_rate,
             n_fft=n_fft,
             win_length=win_length,
             hop_length=hop_length,
-            f_min=40,
+            f_min=fmin,
             n_mels=num_mels,
             power=2,
             )
-
         # in this verion data_dict is a dictionary for .wav filenames
         self.data_dict = {}
         # read the number of .wav files under each spkr_ folder
@@ -65,7 +65,29 @@ class DataProc(torch.utils.data.Dataset):
             random_track_idx = random.randint(0, len(self.data_dict[i])-1)
             trackname = self.data_dict[i][random_track_idx]
             # waveform = preprocess_wav(trackname, source_sr=16000)
-            waveform, sr = torchaudio.load(trackname)
+            info = torchaudio.info(trackname)
+            audio_len = info.num_frames
+            sr = info.sample_rate
+            sr_ratio = sr / self.target_sr
+
+               
+            # sample 25600 frames from the waveform
+            actual_segment_size = int(self.segment_size*sr_ratio)
+            if audio_len > actual_segment_size:
+                start = random.randint(0, audio_len-actual_segment_size)   
+            waveform, sr = torchaudio.load(
+                trackname,
+                frame_offset=start,
+                num_frames=actual_segment_size)
+
+            # resample the waveform to 16000 if it is not already
+            if sr != self.target_sr:
+                waveform = torchaudio.functional.resample(
+                    waveform,
+                    sr,
+                    self.target_sr
+                    )                             
+
             waveform = waveform[0]
             rslt.append(self.random_sample(i,waveform))
 
