@@ -54,7 +54,7 @@ class DataProc(torch.utils.data.Dataset):
         # count the total number of .wav files inside self.data_dict
         for i in range(len(self.data_dict.keys())):
             total_tracks += len(self.data_dict[i])
-        return int(total_tracks)*self.args.n_cpu
+        return int(total_tracks)# *self.args.n_cpu
 
     def __getitem__(self, item):
         rslt = []
