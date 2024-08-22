@@ -46,7 +46,7 @@ cuda = True if torch.cuda.is_available() else False
 os.makedirs("saved_models/%s" % opt.model_name, exist_ok=True)
 
 # finds all possible transfer pairings without repetition (each will be used for a forward and backward pass)
-transfer_combos = list(itertools.combinations(range(2, 4), 2))
+transfer_combos = list(itertools.combinations(range(2), 2))
 
 # Create plot output directories
 if opt.plot_interval != -1:
@@ -85,7 +85,7 @@ if opt.epoch != 0:
 else:
     # Initialize weights
     encoder.apply(weights_init_normal)
-    for n in range(2, 4):
+    for n in range(opt.n_spkrs):
         G[n].apply(weights_init_normal)
         D[n].apply(weights_init_normal)
 
@@ -260,13 +260,13 @@ def train_global():
 
         # Update learning rates
         lr_scheduler_G.step()
-        for n in range(2, 4): # for n in range(0, opt.n_spkrs):
+        for n in range(opt.n_spkrs): # for n in range(0, opt.n_spkrs):
             lr_scheduler_D[n].step()
 
         if opt.checkpoint_interval != -1 and (epoch+1) % opt.checkpoint_interval == 0:
             # Save model checkpoints
             torch.save(encoder.state_dict(), "saved_models/%s/encoder_%02d.pth" % (opt.model_name, epoch))
-            for n in range(2, 4): # for n in range(0, opt.n_spkrs):
+            for n in range(opt.n_spkrs): # for n in range(0, opt.n_spkrs):
                 torch.save(G[n].state_dict(), "saved_models/%s/G%d_%02d.pth" % (opt.model_name, n+1, epoch))
                 torch.save(D[n].state_dict(), "saved_models/%s/D%d_%02d.pth" % (opt.model_name, n+1, epoch))
 
