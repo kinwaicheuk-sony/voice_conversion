@@ -4,8 +4,17 @@ import pickle
 import random
 import os
 from utils import ls, preprocess_wav, melspectrogram
+import torchaudio
+from torchaudio import transforms
+import torch
 
-from params import num_samples
+from params import *
+
+def amp_to_db(x):
+    return 20 * torch.log10(torch.maximum(x, torch.tensor([1e-5])))
+
+def normalize(S):
+    return torch.clip((S - min_level_db) / -min_level_db, 0, 1)
 
 class DataProc(torch.utils.data.Dataset):
 
@@ -14,6 +23,16 @@ class DataProc(torch.utils.data.Dataset):
         # read the number of folders started with spkr_ under /workspace/data/kinwai/tt-vae-gan/voice_conversion/data/data_urmp
         data_urmp_path = args.dataset
         spkr_folders = [folder for folder in os.listdir(data_urmp_path) if folder.startswith('spkr_')]
+
+        self.mel_specgram = transforms.MelSpectrogram(
+            sample_rate=sample_rate,
+            n_fft=n_fft,
+            win_length=win_length,
+            hop_length=hop_length,
+            f_min=40,
+            n_mels=num_mels,
+            power=2,
+            )
 
         # in this verion data_dict is a dictionary for .wav filenames
         self.data_dict = {}
@@ -45,12 +64,14 @@ class DataProc(torch.utils.data.Dataset):
             # chose random item based on prop distribution (length of each sample)
             random_track_idx = random.randint(0, len(self.data_dict[i])-1)
             trackname = self.data_dict[i][random_track_idx]
-            waveform = preprocess_wav(trackname, source_sr=16000)
+            # waveform = preprocess_wav(trackname, source_sr=16000)
+            waveform, sr = torchaudio.load(trackname)
+            waveform = waveform[0]
             rslt.append(self.random_sample(i,waveform))
 
         # prepares a random sample per speaker
         samples = {}
-        for i in range(0, n_spkrs): samples[i] = np.array(rslt)[i,:]
+        for i in range(0, n_spkrs): samples[i] = rslt[i]
         return samples
 
     def augment(self,data,sample_rate=16000, pitch_shift=0.5):
@@ -59,8 +80,10 @@ class DataProc(torch.utils.data.Dataset):
 
     def random_sample(self,i,waveform):
         n_samples = num_samples
-        data = melspectrogram(waveform)
+        data = self.mel_specgram(waveform)
+        data = amp_to_db(data)-ref_level_db
+        data = normalize(data)        
         assert data.shape[1] >= n_samples
         rand_i = random.randint(0,data.shape[1]-n_samples)
         data = data[:,rand_i:rand_i+n_samples]
-        return np.array([data])
+        return data.unsqueeze(0)
